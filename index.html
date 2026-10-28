@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Free Hours</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ======================= CONFIGURE HERE ======================= */
+const CONFIG = {
+  SUPABASE_URL: "",          // e.g. "https://abcd1234.supabase.co"  (leave empty = demo mode)
+  SUPABASE_ANON_KEY: "",     // Project Settings → API → anon / publishable key (safe to be public)
+  OWNER_EMAIL: "fynn.neurath@uni-tuebingen.de",         // your email – must match the one in schema.sql
+  TITLE: "When are you free?",
+  // "weekly" = a recurring Mon–Sun week, or a list of specific dates:
+  // DAYS: ["2026-11-02","2026-11-03","2026-11-04"],
+  DAYS: "weekly",
+  START_HOUR: 8,             // first slot starts at 08:00
+  END_HOUR: 22,              // last slot ends at 22:00
+  SLOT_MINUTES: 60           // 60 = hourly, 30 = half-hourly
+};
+/* ============================================================== */
+</script>
+<style>
+:root{
+  --bg:#f6f5f1;--panel:#ffffff;--text:#1d1d1b;--muted:#6b6a64;--line:#e2e0d9;
+  --accent:#1f8a5b;--accent-rgb:31,138,91;--mine:#2f6fdb;--cell:#eeede8;--warn:#c2410c;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#141413;--panel:#1d1d1b;--text:#ecebe6;--muted:#9a9993;--line:#34332f;
+  --accent:#3fbf86;--accent-rgb:63,191,134;--mine:#5b8ff0;--cell:#282825;--warn:#fb923c}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1120px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}
+h2{font-size:16px;margin:0 0 10px}
+p{margin:0 0 10px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.hidden{display:none!important}
+input[type=text],input[type=email]{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;max-width:320px}
+button,select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.link{border:none;background:none;padding:0;color:var(--muted);text-decoration:underline}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+header.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.banner{background:rgba(var(--accent-rgb),.12);border:1px solid rgba(var(--accent-rgb),.35);border-radius:10px;padding:10px 12px;margin-bottom:16px;font-size:14px}
+.tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 12px;color:var(--muted)}
+.tabs button.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+.status{font-size:13px;color:var(--muted);min-height:1.2em}
+.status.err{color:var(--warn)}
+/* grid */
+.gridwrap{overflow-x:auto;padding-bottom:4px}
+.grid{display:grid;gap:2px;user-select:none;-webkit-user-select:none;min-width:min-content}
+.hd{font-size:12px;text-align:center;color:var(--muted);padding:2px 0 6px;line-height:1.2}
+.hd b{color:var(--text);font-weight:600}
+.tm{font-size:11px;color:var(--muted);text-align:right;padding-right:6px;transform:translateY(-6px)}
+.cell{height:26px;border-radius:4px;background:var(--cell);touch-action:none}
+.edit .cell{cursor:pointer}
+.edit .cell.on{background:var(--mine)}
+.heat .cell{cursor:pointer}
+.heat .cell.all{box-shadow:inset 0 0 0 2px var(--text)}
+.heat .cell.focus{outline:2px solid var(--warn);outline-offset:1px}
+/* overview */
+.overview{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:760px){.overview{grid-template-columns:1fr}}
+.people label{display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer}
+.people .cnt{margin-left:auto;font-size:12px;color:var(--muted)}
+.legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin:10px 0 0}
+.legend .sw{width:18px;height:12px;border-radius:3px}
+.detail{margin-top:12px;font-size:14px;min-height:3em}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;margin:2px 4px 2px 0;font-size:13px;background:rgba(var(--accent-rgb),.18)}
+.chip.no{background:var(--cell);color:var(--muted)}
+.best{list-style:none;margin:0;padding:0}
+.best li{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:14px}
+.side>*+*{margin-top:16px}
+.landing{max-width:440px;margin:8vh auto 0}
+.landing>*+*{margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+  <div id="demoBanner" class="banner hidden">
+    <b>Demo mode</b> – no database configured, so data stays in this browser with some made-up people.
+    <span class="row" style="margin-top:6px">View as
+      <select id="demoRole"><option value="owner">Organizer (you)</option><option value="guest">Participant</option></select>
+    </span>
+  </div>
+
+  <!-- Landing / sign in -->
+  <section id="landing" class="landing hidden">
+    <div>
+      <h1 class="pageTitle"></h1>
+      <p class="muted">Mark the hours you're free. Only you and the organizer can see your entries.</p>
+    </div>
+    <div class="panel">
+      <label for="startName" class="small muted">Your name</label>
+      <div class="row" style="margin-top:4px">
+        <input id="startName" type="text" maxlength="60" placeholder="e.g. Alex">
+        <button id="startBtn" class="primary">Start</button>
+      </div>
+      <div id="startMsg" class="status" style="margin-top:6px"></div>
+    </div>
+    <details>
+      <summary class="small muted" style="cursor:pointer">Organizer login</summary>
+      <div class="panel" style="margin-top:8px">
+        <div class="row">
+          <input id="ownerEmail" type="email" placeholder="your email">
+          <button id="ownerBtn">Send login link</button>
+        </div>
+        <div id="ownerMsg" class="status" style="margin-top:6px"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- App -->
+  <section id="app" class="hidden">
+    <header class="top">
+      <div>
+        <h1 class="pageTitle"></h1>
+        <div id="whoami" class="small muted"></div>
+      </div>
+      <button id="signOut" class="link small hidden">Sign out</button>
+    </header>
+
+    <nav id="tabs" class="tabs hidden">
+      <button data-tab="mine" class="active">My hours</button>
+      <button data-tab="overview">Overview</button>
+    </nav>
+
+    <div id="tab-mine" class="panel">
+      <div class="row" style="justify-content:space-between;margin-bottom:12px">
+        <div class="row">
+          <label for="myName" class="small muted">Name</label>
+          <input id="myName" type="text" maxlength="60" style="max-width:220px">
+        </div>
+        <div class="row">
+          <button id="clearMine" class="small">Clear all</button>
+          <span id="saveStatus" class="status"></span>
+        </div>
+      </div>
+      <p class="small muted">Click or drag across the grid to mark when you're free. Changes save automatically.</p>
+      <div class="gridwrap"><div id="editGrid" class="grid edit"></div></div>
+    </div>
+
+    <div id="tab-overview" class="hidden">
+      <div class="overview">
+        <div class="side">
+          <div class="panel">
+            <div class="row" style="justify-content:space-between;margin-bottom:6px">
+              <h2 style="margin:0">People</h2>
+              <span class="row small"><button id="selAll" class="link">all</button><button id="selNone" class="link">none</button></span>
+            </div>
+            <div id="people" class="people"></div>
+            <button id="refresh" class="small" style="margin-top:10px">Refresh</button>
+          </div>
+          <div class="panel">
+            <h2>Best times</h2>
+            <ul id="best" class="best"></ul>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="gridwrap"><div id="heatGrid" class="grid heat"></div></div>
+          <div class="legend">
+            <span>fewer</span>
+            <span class="sw" style="background:rgba(var(--accent-rgb),.2)"></span>
+            <span class="sw" style="background:rgba(var(--accent-rgb),.55)"></span>
+            <span class="sw" style="background:rgba(var(--accent-rgb),1)"></span>
+            <span>more free</span>
+            <span class="sw" style="background:rgba(var(--accent-rgb),1);box-shadow:inset 0 0 0 2px var(--text);margin-left:10px"></span>
+            <span>everyone selected</span>
+          </div>
+          <div id="detail" class="detail muted">Hover or tap a slot to see who's free.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const demo = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
+const WEEK = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+/* ---------- days & times ---------- */
+const DAYS = CONFIG.DAYS === "weekly"
+  ? WEEK.map(d => ({ key: d, label: d, sub: "" }))
+  : CONFIG.DAYS.map(s => {
+      const d = new Date(s + "T00:00:00");
+      return { key: s,
+        label: d.toLocaleDateString(undefined, { weekday: "short" }),
+        sub: d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) };
+    });
+const pad = n => String(n).padStart(2, "0");
+const fmt = m => pad(Math.floor(m / 60)) + ":" + pad(m % 60);
+const TIMES = [];
+for (let m = CONFIG.START_HOUR * 60; m < CONFIG.END_HOUR * 60; m += CONFIG.SLOT_MINUTES) TIMES.push(fmt(m));
+const ALL_SLOTS = [];
+DAYS.forEach(d => TIMES.forEach(t => ALL_SLOTS.push(d.key + "|" + t)));
+function slotLabel(k) {
+  const [dk, t] = k.split("|");
+  const d = DAYS.find(x => x.key === dk);
+  const [h, mi] = t.split(":").map(Number);
+  return (d ? d.label + (d.sub ? " " + d.sub : "") : dk) + ", " + t + "–" + fmt(h * 60 + mi + CONFIG.SLOT_MINUTES);
+}
+
+/* ---------- state ---------- */
+let sb = null;
+const me = { id: null, email: "", isOwner: false };
+let myName = "";
+let mySlots = new Set();
+let everyone = [];            // rows: {user_id, name, slots}
+const included = new Set();
+const seen = new Set();
+let focusKey = null;
+
+/* ---------- helpers ---------- */
+function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function show(id, on) { $(id).classList.toggle("hidden", !on); }
+function setStatus(el, msg, err) { el.textContent = msg || ""; el.classList.toggle("err", !!err); }
+document.querySelectorAll(".pageTitle").forEach(e => e.textContent = CONFIG.TITLE);
+document.title = CONFIG.TITLE;
+
+/* ---------- demo storage ---------- */
+const DEMO_KEY = "freehours-demo-v1";
+let demoMem = null;
+function demoLoad() {
+  if (demoMem) return demoMem;
+  try { const s = localStorage.getItem(DEMO_KEY); if (s) return (demoMem = JSON.parse(s)); } catch (e) {}
+  let seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const people = ["Anna", "Ben", "Chiara", "David"].map((name, i) => {
+    const slots = [];
+    DAYS.forEach(d => {
+      if (rnd() < 0.25) return;
+      const start = Math.floor(rnd() * (TIMES.length - 3));
+      const len = 2 + Math.floor(rnd() * 6);
+      for (let j = start; j < Math.min(TIMES.length, start + len); j++) slots.push(d.key + "|" + TIMES[j]);
+    });
+    return { user_id: "demo-" + i, name, slots };
+  });
+  return (demoMem = people);
+}
+function demoSave(row) {
+  const rows = demoLoad().filter(r => r.user_id !== row.user_id).concat([row]);
+  demoMem = rows;
+  try { localStorage.setItem(DEMO_KEY, JSON.stringify(rows)); } catch (e) {}
+}
+
+/* ---------- edit grid ---------- */
+function buildGrid(el, decorate) {
+  el.innerHTML = "";
+  el.style.gridTemplateColumns = `48px repeat(${DAYS.length}, minmax(40px, 1fr))`;
+  el.append(mk("div", "hd"));
+  DAYS.forEach(d => {
+    const h = mk("div", "hd");
+    h.append(mk("b", null, d.label));
+    if (d.sub) { h.append(document.createElement("br"), document.createTextNode(d.sub)); }
+    el.append(h);
+  });
+  TIMES.forEach(t => {
+    el.append(mk("div", "tm", t));
+    DAYS.forEach(d => {
+      const c = mk("div", "cell");
+      c.dataset.k = d.key + "|" + t;
+      decorate(c);
+      el.append(c);
+    });
+  });
+}
+function renderEdit() {
+  buildGrid($("editGrid"), c => c.classList.toggle("on", mySlots.has(c.dataset.k)));
+  const free = mySlots.size;
+  $("whoami").textContent = (me.isOwner ? "Organizer · " : "") + (myName ? myName + " · " : "") + free + " slot" + (free === 1 ? "" : "s") + " marked";
+}
+(function setupPainting() {
+  const grid = $("editGrid");
+  let paint = null;
+  const apply = c => {
+    const k = c.dataset.k;
+    if (paint) mySlots.add(k); else mySlots.delete(k);
+    c.classList.toggle("on", paint);
+  };
+  grid.addEventListener("pointerdown", e => {
+    const c = e.target.closest(".cell"); if (!c) return;
+    e.preventDefault();
+    paint = !mySlots.has(c.dataset.k);
+    apply(c);
+  });
+  grid.addEventListener("pointermove", e => {
+    if (paint === null) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const c = el && el.closest && el.closest(".cell");
+    if (c && grid.contains(c)) apply(c);
+  });
+  const end = () => { if (paint !== null) { paint = null; renderEdit(); scheduleSave(); } };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+})();
+
+/* ---------- saving ---------- */
+let saveTimer = null;
+function scheduleSave() {
+  setStatus($("saveStatus"), "Saving…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 600);
+}
+async function save() {
+  const name = myName.trim();
+  if (!name) { setStatus($("saveStatus"), "Enter your name to save", true); return; }
+  const row = { user_id: me.id, name, slots: [...mySlots].sort() };
+  if (demo) demoSave(row);
+  else {
+    const { error } = await sb.from("availability").upsert(row, { onConflict: "user_id" });
+    if (error) { setStatus($("saveStatus"), "Couldn't save: " + error.message, true); return; }
+  }
+  everyone = everyone.filter(r => r.user_id !== me.id).concat([row]);
+  setStatus($("saveStatus"), "Saved ✓");
+  if (me.isOwner) renderOverview();
+}
+$("myName").addEventListener("input", e => { myName = e.target.value; renderEdit(); scheduleSave(); });
+$("clearMine").addEventListener("click", () => {
+  if (!mySlots.size || !confirm("Clear all your marked hours?")) return;
+  mySlots.clear(); renderEdit(); scheduleSave();
+});
+
+/* ---------- overview (organizer) ---------- */
+async function loadAll() {
+  if (demo) everyone = demoLoad().slice();
+  else {
+    const { data, error } = await sb.from("availability").select("user_id,name,slots").order("name");
+    if (error) { $("detail").textContent = "Couldn't load: " + error.message; return; }
+    everyone = data || [];
+  }
+  everyone.forEach(r => { if (!seen.has(r.user_id)) { seen.add(r.user_id); included.add(r.user_id); } });
+  renderOverview();
+}
+function renderPeople() {
+  const box = $("people"); box.innerHTML = "";
+  if (!everyone.length) { box.append(mk("p", "small muted", "No entries yet. Share the page link!")); return; }
+  const sorted = everyone.slice().sort((a, b) => (b.user_id === me.id) - (a.user_id === me.id) || a.name.localeCompare(b.name));
+  sorted.forEach(r => {
+    const l = mk("label");
+    const cb = mk("input"); cb.type = "checkbox"; cb.checked = included.has(r.user_id);
+    cb.addEventListener("change", () => { cb.checked ? included.add(r.user_id) : included.delete(r.user_id); renderOverview(); });
+    l.append(cb, mk("span", null, r.name + (r.user_id === me.id ? " (you)" : "")), mk("span", "cnt", String((r.slots || []).length)));
+    box.append(l);
+  });
+}
+function counts() {
+  const sel = everyone.filter(r => included.has(r.user_id));
+  const map = new Map(ALL_SLOTS.map(k => [k, []]));
+  sel.forEach(r => (r.slots || []).forEach(k => { if (map.has(k)) map.get(k).push(r.name); }));
+  return { sel, map };
+}
+function renderOverview() {
+  renderPeople();
+  const { sel, map } = counts();
+  const n = sel.length;
+  buildGrid($("heatGrid"), c => {
+    const k = c.dataset.k, cnt = map.get(k).length;
+    if (cnt) c.style.background = `rgba(var(--accent-rgb), ${0.15 + 0.85 * cnt / n})`;
+    if (n && cnt === n) c.classList.add("all");
+    if (k === focusKey) c.classList.add("focus");
+    c.title = `${slotLabel(k)}: ${cnt}/${n} free`;
+  });
+  // best times
+  const best = $("best"); best.innerHTML = "";
+  const ranked = ALL_SLOTS.map(k => [k, map.get(k).length]).filter(x => x[1] > 0)
+    .sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!ranked.length) best.append(mk("li", "muted", n ? "No overlap yet" : "Select some people"));
+  ranked.forEach(([k, c]) => {
+    const li = mk("li"); li.style.cursor = "pointer";
+    li.append(mk("span", null, slotLabel(k)), mk("span", "muted", c + "/" + n));
+    li.addEventListener("click", () => { focusKey = k; renderOverview(); });
+    best.append(li);
+  });
+  if (focusKey) showDetail(focusKey, map, sel);
+}
+function showDetail(k, map, sel) {
+  if (!map) ({ map, sel } = counts());
+  const free = map.get(k) || [];
+  const not = sel.map(r => r.name).filter(nm => !free.includes(nm));
+  const d = $("detail"); d.innerHTML = ""; d.classList.remove("muted");
+  d.append(mk("div", null, slotLabel(k) + " — " + free.length + "/" + sel.length + " free"));
+  const line = mk("div");
+  free.forEach(nm => line.append(mk("span", "chip", nm)));
+  not.forEach(nm => line.append(mk("span", "chip no", nm)));
+  d.append(line);
+}
+$("heatGrid").addEventListener("mouseover", e => { const c = e.target.closest(".cell"); if (c) showDetail(c.dataset.k); });
+$("heatGrid").addEventListener("click", e => {
+  const c = e.target.closest(".cell"); if (!c) return;
+  focusKey = focusKey === c.dataset.k ? null : c.dataset.k; renderOverview(); showDetail(c.dataset.k);
+});
+$("selAll").addEventListener("click", () => { everyone.forEach(r => included.add(r.user_id)); renderOverview(); });
+$("selNone").addEventListener("click", () => { included.clear(); renderOverview(); });
+$("refresh").addEventListener("click", loadAll);
+
+/* ---------- tabs ---------- */
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x === b));
+  show("tab-mine", b.dataset.tab === "mine");
+  show("tab-overview", b.dataset.tab === "overview");
+  if (b.dataset.tab === "overview") loadAll();
+});
+
+/* ---------- entering the app ---------- */
+async function enterApp() {
+  show("landing", false); show("app", true);
+  show("tabs", me.isOwner);
+  show("signOut", !demo && me.isOwner);
+  if (!me.isOwner) { show("tab-mine", true); show("tab-overview", false); }
+  // load my own row
+  let row = null;
+  if (demo) row = demoLoad().find(r => r.user_id === me.id) || null;
+  else {
+    const { data } = await sb.from("availability").select("user_id,name,slots").eq("user_id", me.id).maybeSingle();
+    row = data;
+  }
+  if (row) { myName = row.name; mySlots = new Set(row.slots || []); }
+  if (!myName && me.isOwner) myName = me.email ? me.email.split("@")[0] : "Me";
+  $("myName").value = myName;
+  renderEdit();
+  if (me.isOwner) loadAll();
+}
+
+/* ---------- landing actions ---------- */
+$("startBtn").addEventListener("click", async () => {
+  const name = $("startName").value.trim();
+  if (!name) { setStatus($("startMsg"), "Please enter your name", true); return; }
+  setStatus($("startMsg"), "One moment…");
+  const { data, error } = await sb.auth.signInAnonymously();
+  if (error) { setStatus($("startMsg"), "Couldn't start: " + error.message, true); return; }
+  me.id = data.user.id; me.email = ""; me.isOwner = false;
+  myName = name;
+  await enterApp();
+  save();
+});
+$("startName").addEventListener("keydown", e => { if (e.key === "Enter") $("startBtn").click(); });
+$("ownerBtn").addEventListener("click", async () => {
+  const email = $("ownerEmail").value.trim();
+  if (!email) return;
+  setStatus($("ownerMsg"), "Sending…");
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  setStatus($("ownerMsg"), error ? "Error: " + error.message : "Check your inbox and open the link on this device.", !!error);
+});
+$("signOut").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
+
+/* ---------- start ---------- */
+async function init() {
+  if (demo) {
+    show("demoBanner", true);
+    const role = $("demoRole");
+    const go = () => {
+      me.id = "demo-me"; me.isOwner = role.value === "owner";
+      focusKey = null;
+      document.querySelector('#tabs button[data-tab="mine"]').click();
+      enterApp();
+    };
+    role.addEventListener("change", go);
+    go();
+    return;
+  }
+  sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { show("landing", true); return; }
+  me.id = session.user.id;
+  me.email = session.user.email || "";
+  me.isOwner = !!me.email && me.email.toLowerCase() === CONFIG.OWNER_EMAIL.trim().toLowerCase();
+  enterApp();
+}
+init();
+})();
+</script>
+</body>
+</html>
