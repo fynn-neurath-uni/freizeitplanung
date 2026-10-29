@@ -15,8 +15,8 @@ const CONFIG = {
   // "weekly" = a recurring Mon–Sun week, or a list of specific dates:
   // DAYS: ["2026-11-02","2026-11-03","2026-11-04"],
   DAYS: "weekly",
-  START_HOUR: 8,             // first slot starts at 08:00
-  END_HOUR: 22,              // last slot ends at 22:00
+  START_HOUR: 9,             // first slot starts at 09:00
+  END_HOUR: 24,              // last slot ends at 24:00 (midnight)
   SLOT_MINUTES: 60           // 60 = hourly, 30 = half-hourly
 };
 /* ============================================================== */
@@ -24,11 +24,11 @@ const CONFIG = {
 <style>
 :root{
   --bg:#f6f5f1;--panel:#ffffff;--text:#1d1d1b;--muted:#6b6a64;--line:#e2e0d9;
-  --accent:#1f8a5b;--accent-rgb:31,138,91;--mine:#2f6fdb;--cell:#eeede8;--warn:#c2410c;
+  --accent:#1f8a5b;--accent-rgb:31,138,91;--mine:#2f6fdb;--mine-rgb:47,111,219;--cell:#eeede8;--warn:#c2410c;
 }
 @media (prefers-color-scheme:dark){
   :root{--bg:#141413;--panel:#1d1d1b;--text:#ecebe6;--muted:#9a9993;--line:#34332f;
-  --accent:#3fbf86;--accent-rgb:63,191,134;--mine:#5b8ff0;--cell:#282825;--warn:#fb923c}
+  --accent:#3fbf86;--accent-rgb:63,191,134;--mine:#5b8ff0;--mine-rgb:91,143,240;--cell:#282825;--warn:#fb923c}
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -61,9 +61,19 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
 .cell{height:26px;border-radius:4px;background:var(--cell);touch-action:none}
 .edit .cell{cursor:pointer}
 .edit .cell.on{background:var(--mine)}
+.sw.maybe,.edit .cell.maybe{background:repeating-linear-gradient(135deg,rgba(var(--mine-rgb),.85) 0 3px,rgba(var(--mine-rgb),.3) 3px 7px)}
+.sw.on{background:var(--mine)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:none;border-radius:0;display:inline-flex;align-items:center;gap:6px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.active{background:rgba(var(--mine-rgb),.14);font-weight:600}
+.seg .sw{width:14px;height:14px;border-radius:3px}
 .heat .cell{cursor:pointer}
 .heat .cell.all{box-shadow:inset 0 0 0 2px var(--text)}
 .heat .cell.focus{outline:2px solid var(--warn);outline-offset:1px}
+.mine-dot{position:relative}
+.mine-dot::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--mine);box-shadow:0 0 0 1.5px var(--panel)}
+.mine-dot.maybe-dot::after{background:var(--panel);box-shadow:inset 0 0 0 2px var(--mine),0 0 0 1.5px var(--panel)}
 /* overview */
 .overview{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:760px){.overview{grid-template-columns:1fr}}
@@ -74,9 +84,30 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
 .detail{margin-top:12px;font-size:14px;min-height:3em}
 .chip{display:inline-block;padding:1px 8px;border-radius:999px;margin:2px 4px 2px 0;font-size:13px;background:rgba(var(--accent-rgb),.18)}
 .chip.no{background:var(--cell);color:var(--muted)}
+.chip.maybe{background:rgba(var(--accent-rgb),.06);outline:1px dashed rgba(var(--accent-rgb),.8);outline-offset:-1px}
 .best{list-style:none;margin:0;padding:0}
 .best li{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:14px}
 .side>*+*{margin-top:16px}
+/* events */
+.events{list-style:none;margin:0;padding:0}
+.events li{padding:10px 0;border-bottom:1px solid var(--line)}
+.evtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.answers{margin-top:6px}
+.ans.picked.yes{background:var(--accent);border-color:var(--accent);color:#fff}
+.ans.picked.no{background:var(--warn);border-color:var(--warn);color:#fff}
+.comments{margin-top:6px}
+.comments summary{cursor:pointer}
+.comment{border-top:1px solid var(--line);margin-top:6px;padding-top:6px}
+.comment .body{white-space:pre-wrap;overflow-wrap:anywhere}
+.comments .row{margin-top:8px}
+.comments input{max-width:420px}
+.events li:last-child{border-bottom:none}
+.evform{margin-top:16px}
+.evform .fields{display:grid;gap:10px;margin-bottom:12px}
+.evform label.f{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.evform input[type=date],.evform input[type=time]{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.events li.past{opacity:.55}
+.participant #tab-events{margin-bottom:16px}
 .landing{max-width:440px;margin:8vh auto 0}
 .landing>*+*{margin-top:14px}
 </style>
@@ -129,7 +160,47 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
     <nav id="tabs" class="tabs hidden">
       <button data-tab="mine" class="active">My hours</button>
       <button data-tab="overview">Overview</button>
+      <button data-tab="events">Events</button>
     </nav>
+
+    <!-- Events: separate from the weekly grid, on real dates. Participants see this above their grid when invited. -->
+    <div id="tab-events" class="hidden">
+      <div class="panel">
+        <div class="row" style="justify-content:space-between;margin-bottom:4px">
+          <h2 id="eventsTitle" style="margin:0">Events</h2>
+          <span class="row"><button id="evRefresh" class="link small">Refresh</button><button id="newEvent" class="small hidden">+ New event</button></span>
+        </div>
+        <ul id="events" class="events"></ul>
+      </div>
+      <div id="eventForm" class="panel evform hidden">
+        <h2>New event</h2>
+        <div class="fields">
+          <label class="f">Title <input id="evTitle" type="text" maxlength="100" placeholder="e.g. Board game night"></label>
+          <label class="f">Where <input id="evWhere" type="text" maxlength="200" placeholder="optional"></label>
+          <div class="row">
+            <label class="f">Date <input id="evDate" type="date"></label>
+            <label class="f">From <input id="evStart" type="time"></label>
+            <label class="f">To <input id="evEnd" type="time"> </label>
+          </div>
+        </div>
+        <div class="row" style="justify-content:space-between;max-width:360px">
+          <span class="small muted">Invite (only they will see it)</span>
+          <span class="row small"><button id="evAll" class="link">all</button><button id="evNone" class="link">none</button></span>
+        </div>
+        <div id="evPeople" class="people" style="max-width:360px;margin-bottom:10px"></div>
+        <div class="small muted">…or add people by name (they see it once their name matches)</div>
+        <div class="row" style="margin:4px 0 6px">
+          <input id="evName" type="text" maxlength="60" placeholder="e.g. Eva" style="max-width:220px">
+          <button id="evAddName" class="small">Add</button>
+        </div>
+        <div id="evNames" style="margin-bottom:12px"></div>
+        <div class="row">
+          <button id="evSave" class="primary">Create event</button>
+          <button id="evCancel">Cancel</button>
+          <span id="evMsg" class="status"></span>
+        </div>
+      </div>
+    </div>
 
     <div id="tab-mine" class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:12px">
@@ -142,7 +213,14 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
           <span id="saveStatus" class="status"></span>
         </div>
       </div>
-      <p class="small muted">Click or drag across the grid to mark when you're free. Changes save automatically.</p>
+      <div class="row" style="margin-bottom:8px">
+        <span class="small muted">Mark as</span>
+        <div id="brush" class="seg">
+          <button data-v="free" class="active"><span class="sw on"></span>Free</button>
+          <button data-v="maybe"><span class="sw maybe"></span>Possible as exception</button>
+        </div>
+      </div>
+      <p class="small muted">Click or drag across the grid to mark your hours. Clicking a slot that already has the chosen option clears it. Changes save automatically.</p>
       <div class="gridwrap"><div id="editGrid" class="grid edit"></div></div>
     </div>
 
@@ -159,7 +237,9 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
           </div>
           <div class="panel">
             <h2>Best times</h2>
+            <label class="row small muted" style="margin-bottom:6px;cursor:pointer"><input id="onlyMine" type="checkbox"> only when I'm available</label>
             <ul id="best" class="best"></ul>
+            <p class="small muted" style="margin:6px 0 0">“+1” = one more person possible as exception</p>
           </div>
         </div>
         <div class="panel">
@@ -171,8 +251,13 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
             <span class="sw" style="background:rgba(var(--accent-rgb),1)"></span>
             <span>more free</span>
             <span class="sw" style="background:rgba(var(--accent-rgb),1);box-shadow:inset 0 0 0 2px var(--text);margin-left:10px"></span>
-            <span>everyone selected</span>
+            <span>everyone available</span>
+            <span class="sw mine-dot" style="background:var(--cell);margin-left:10px"></span>
+            <span>you're free</span>
+            <span class="sw mine-dot maybe-dot" style="background:var(--cell);margin-left:10px"></span>
+            <span>you: exception</span>
           </div>
+          <p class="small muted" style="margin:6px 0 0">“Possible as exception” counts half in the colour.</p>
           <div id="detail" class="detail muted">Hover or tap a slot to see who's free.</div>
         </div>
       </div>
@@ -213,8 +298,10 @@ function slotLabel(k) {
 let sb = null;
 const me = { id: null, email: "", isOwner: false };
 let myName = "";
-let mySlots = new Set();
-let everyone = [];            // rows: {user_id, name, slots}
+let mySlots = new Set();      // free
+let myMaybe = new Set();      // possible as exception
+let everyone = [];            // rows: {user_id, name, slots, maybe_slots}
+let events = [];              // rows: {id, title, location, day, start_time, end_time, invitees}
 const included = new Set();
 const seen = new Set();
 let focusKey = null;
@@ -227,7 +314,7 @@ document.querySelectorAll(".pageTitle").forEach(e => e.textContent = CONFIG.TITL
 document.title = CONFIG.TITLE;
 
 /* ---------- demo storage ---------- */
-const DEMO_KEY = "freehours-demo-v1";
+const DEMO_KEY = "freehours-demo-v2";
 let demoMem = null;
 function demoLoad() {
   if (demoMem) return demoMem;
@@ -235,14 +322,16 @@ function demoLoad() {
   let seed = 7;
   const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const people = ["Anna", "Ben", "Chiara", "David"].map((name, i) => {
-    const slots = [];
+    const slots = [], maybe = [];
     DAYS.forEach(d => {
       if (rnd() < 0.25) return;
       const start = Math.floor(rnd() * (TIMES.length - 3));
       const len = 2 + Math.floor(rnd() * 6);
-      for (let j = start; j < Math.min(TIMES.length, start + len); j++) slots.push(d.key + "|" + TIMES[j]);
+      const end = Math.min(TIMES.length, start + len);
+      for (let j = start; j < end; j++) slots.push(d.key + "|" + TIMES[j]);
+      if (rnd() < 0.6) for (let j = end; j < Math.min(TIMES.length, end + 1 + Math.floor(rnd() * 2)); j++) maybe.push(d.key + "|" + TIMES[j]);
     });
-    return { user_id: "demo-" + i, name, slots };
+    return { user_id: "demo-" + i, name, slots, maybe_slots: maybe };
   });
   return (demoMem = people);
 }
@@ -250,6 +339,16 @@ function demoSave(row) {
   const rows = demoLoad().filter(r => r.user_id !== row.user_id).concat([row]);
   demoMem = rows;
   try { localStorage.setItem(DEMO_KEY, JSON.stringify(rows)); } catch (e) {}
+}
+const DEMO_EV_KEY = "freehours-demo-events-v1", DEMO_RSVP_KEY = "freehours-demo-rsvp-v1", DEMO_COMMENTS_KEY = "freehours-demo-comments-v1";
+const demoLists = {};
+function demoList(key) {
+  if (!demoLists[key]) { try { demoLists[key] = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { demoLists[key] = []; } }
+  return demoLists[key];
+}
+function demoListSave(key, rows) {
+  demoLists[key] = rows;
+  try { localStorage.setItem(key, JSON.stringify(rows)); } catch (e) {}
 }
 
 /* ---------- edit grid ---------- */
@@ -274,37 +373,52 @@ function buildGrid(el, decorate) {
   });
 }
 function renderEdit() {
-  buildGrid($("editGrid"), c => c.classList.toggle("on", mySlots.has(c.dataset.k)));
-  const free = mySlots.size;
-  $("whoami").textContent = (me.isOwner ? "Organizer · " : "") + (myName ? myName + " · " : "") + free + " slot" + (free === 1 ? "" : "s") + " marked";
+  buildGrid($("editGrid"), c => {
+    c.classList.toggle("on", mySlots.has(c.dataset.k));
+    c.classList.toggle("maybe", myMaybe.has(c.dataset.k));
+  });
+  const free = mySlots.size, maybe = myMaybe.size;
+  $("whoami").textContent = (me.isOwner ? "Organizer · " : "") + (myName ? myName + " · " : "") +
+    free + " slot" + (free === 1 ? "" : "s") + " free" + (maybe ? ", " + maybe + " as exception" : "");
 }
+let brush = "free";
+$("brush").addEventListener("click", e => {
+  const b = e.target.closest("button[data-v]"); if (!b) return;
+  brush = b.dataset.v;
+  document.querySelectorAll("#brush button").forEach(x => x.classList.toggle("active", x === b));
+});
 (function setupPainting() {
   const grid = $("editGrid");
-  let paint = null;
+  let painting = false, paint = null;   // paint: "free" | "maybe" | null (= clear)
   const apply = c => {
     const k = c.dataset.k;
-    if (paint) mySlots.add(k); else mySlots.delete(k);
-    c.classList.toggle("on", paint);
+    mySlots.delete(k); myMaybe.delete(k);
+    if (paint === "free") mySlots.add(k); else if (paint === "maybe") myMaybe.add(k);
+    c.classList.toggle("on", paint === "free");
+    c.classList.toggle("maybe", paint === "maybe");
   };
   grid.addEventListener("pointerdown", e => {
     const c = e.target.closest(".cell"); if (!c) return;
     e.preventDefault();
-    paint = !mySlots.has(c.dataset.k);
+    const k = c.dataset.k, cur = mySlots.has(k) ? "free" : myMaybe.has(k) ? "maybe" : null;
+    painting = true;
+    paint = cur === brush ? null : brush;
     apply(c);
   });
   grid.addEventListener("pointermove", e => {
-    if (paint === null) return;
+    if (!painting) return;
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const c = el && el.closest && el.closest(".cell");
     if (c && grid.contains(c)) apply(c);
   });
-  const end = () => { if (paint !== null) { paint = null; renderEdit(); scheduleSave(); } };
+  const end = () => { if (painting) { painting = false; renderEdit(); scheduleSave(); } };
   window.addEventListener("pointerup", end);
   window.addEventListener("pointercancel", end);
 })();
 
 /* ---------- saving ---------- */
 let saveTimer = null;
+let savedName = null;         // name currently stored in the database
 function scheduleSave() {
   setStatus($("saveStatus"), "Saving…");
   clearTimeout(saveTimer);
@@ -313,7 +427,7 @@ function scheduleSave() {
 async function save() {
   const name = myName.trim();
   if (!name) { setStatus($("saveStatus"), "Enter your name to save", true); return; }
-  const row = { user_id: me.id, name, slots: [...mySlots].sort() };
+  const row = { user_id: me.id, name, slots: [...mySlots].sort(), maybe_slots: [...myMaybe].sort() };
   if (demo) demoSave(row);
   else {
     const { error } = await sb.from("availability").upsert(row, { onConflict: "user_id" });
@@ -322,23 +436,27 @@ async function save() {
   everyone = everyone.filter(r => r.user_id !== me.id).concat([row]);
   setStatus($("saveStatus"), "Saved ✓");
   if (me.isOwner) renderOverview();
+  // a new or changed name can match events invited by name
+  else if (norm(name) !== norm(savedName)) loadEvents();
+  savedName = name;
 }
 $("myName").addEventListener("input", e => { myName = e.target.value; renderEdit(); scheduleSave(); });
 $("clearMine").addEventListener("click", () => {
-  if (!mySlots.size || !confirm("Clear all your marked hours?")) return;
-  mySlots.clear(); renderEdit(); scheduleSave();
+  if (!mySlots.size && !myMaybe.size || !confirm("Clear all your marked hours?")) return;
+  mySlots.clear(); myMaybe.clear(); renderEdit(); scheduleSave();
 });
 
 /* ---------- overview (organizer) ---------- */
 async function loadAll() {
   if (demo) everyone = demoLoad().slice();
   else {
-    const { data, error } = await sb.from("availability").select("user_id,name,slots").order("name");
+    const { data, error } = await sb.from("availability").select("user_id,name,slots,maybe_slots").order("name");
     if (error) { $("detail").textContent = "Couldn't load: " + error.message; return; }
     everyone = data || [];
   }
   everyone.forEach(r => { if (!seen.has(r.user_id)) { seen.add(r.user_id); included.add(r.user_id); } });
   renderOverview();
+  renderEvents();
 }
 function renderPeople() {
   const box = $("people"); box.innerHTML = "";
@@ -348,35 +466,50 @@ function renderPeople() {
     const l = mk("label");
     const cb = mk("input"); cb.type = "checkbox"; cb.checked = included.has(r.user_id);
     cb.addEventListener("change", () => { cb.checked ? included.add(r.user_id) : included.delete(r.user_id); renderOverview(); });
-    l.append(cb, mk("span", null, r.name + (r.user_id === me.id ? " (you)" : "")), mk("span", "cnt", String((r.slots || []).length)));
+    const f = (r.slots || []).length, m = (r.maybe_slots || []).length;
+    const cnt = mk("span", "cnt", f + (m ? " +" + m : ""));
+    cnt.title = f + " free" + (m ? ", " + m + " as exception" : "");
+    l.append(cb, mk("span", null, r.name + (r.user_id === me.id ? " (you)" : "")), cnt);
     box.append(l);
   });
 }
 function counts() {
   const sel = everyone.filter(r => included.has(r.user_id));
-  const map = new Map(ALL_SLOTS.map(k => [k, []]));
-  sel.forEach(r => (r.slots || []).forEach(k => { if (map.has(k)) map.get(k).push(r.name); }));
+  const map = new Map(ALL_SLOTS.map(k => [k, { free: [], maybe: [] }]));
+  sel.forEach(r => {
+    (r.slots || []).forEach(k => { if (map.has(k)) map.get(k).free.push(r.name); });
+    (r.maybe_slots || []).forEach(k => { if (map.has(k)) map.get(k).maybe.push(r.name); });
+  });
   return { sel, map };
 }
+const score = e => e.free.length + 0.5 * e.maybe.length;   // an exception counts half
 function renderOverview() {
   renderPeople();
   const { sel, map } = counts();
   const n = sel.length;
   buildGrid($("heatGrid"), c => {
-    const k = c.dataset.k, cnt = map.get(k).length;
-    if (cnt) c.style.background = `rgba(var(--accent-rgb), ${0.15 + 0.85 * cnt / n})`;
-    if (n && cnt === n) c.classList.add("all");
+    const k = c.dataset.k, e = map.get(k), f = e.free.length, m = e.maybe.length;
+    if (f + m) c.style.background = `rgba(var(--accent-rgb), ${0.15 + 0.85 * score(e) / n})`;
+    if (n && f + m === n) c.classList.add("all");
     if (k === focusKey) c.classList.add("focus");
-    c.title = `${slotLabel(k)}: ${cnt}/${n} free`;
+    if (mySlots.has(k)) c.classList.add("mine-dot");
+    else if (myMaybe.has(k)) c.classList.add("mine-dot", "maybe-dot");
+    c.title = `${slotLabel(k)}: ${f}/${n} free` + (m ? `, ${m} as exception` : "") +
+      (mySlots.has(k) ? " · you're free" : myMaybe.has(k) ? " · you: exception" : "");
   });
   // best times
   const best = $("best"); best.innerHTML = "";
-  const ranked = ALL_SLOTS.map(k => [k, map.get(k).length]).filter(x => x[1] > 0)
-    .sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (!ranked.length) best.append(mk("li", "muted", n ? "No overlap yet" : "Select some people"));
-  ranked.forEach(([k, c]) => {
+  const onlyMine = $("onlyMine").checked;
+  const ranked = ALL_SLOTS.filter(k => !onlyMine || mySlots.has(k) || myMaybe.has(k))
+    .map(k => [k, map.get(k)]).filter(([, e]) => score(e) > 0)
+    .sort((a, b) => score(b[1]) - score(a[1]) || b[1].free.length - a[1].free.length).slice(0, 8);
+  if (!ranked.length) best.append(mk("li", "muted",
+    !n ? "Select some people" : onlyMine && !mySlots.size && !myMaybe.size ? "Mark your hours in “My hours” first" : "No overlap yet"));
+  ranked.forEach(([k, e]) => {
     const li = mk("li"); li.style.cursor = "pointer";
-    li.append(mk("span", null, slotLabel(k)), mk("span", "muted", c + "/" + n));
+    const c = mk("span", "muted", e.free.length + "/" + n + (e.maybe.length ? " +" + e.maybe.length : ""));
+    c.title = e.free.length + " free" + (e.maybe.length ? ", " + e.maybe.length + " as exception" : "");
+    li.append(mk("span", null, slotLabel(k)), c);
     li.addEventListener("click", () => { focusKey = k; renderOverview(); });
     best.append(li);
   });
@@ -384,12 +517,14 @@ function renderOverview() {
 }
 function showDetail(k, map, sel) {
   if (!map) ({ map, sel } = counts());
-  const free = map.get(k) || [];
-  const not = sel.map(r => r.name).filter(nm => !free.includes(nm));
+  const { free, maybe } = map.get(k) || { free: [], maybe: [] };
+  const not = sel.map(r => r.name).filter(nm => !free.includes(nm) && !maybe.includes(nm));
   const d = $("detail"); d.innerHTML = ""; d.classList.remove("muted");
-  d.append(mk("div", null, slotLabel(k) + " — " + free.length + "/" + sel.length + " free"));
+  d.append(mk("div", null, slotLabel(k) + " — " + free.length + "/" + sel.length + " free" +
+    (maybe.length ? ", " + maybe.length + " possible as exception" : "")));
   const line = mk("div");
   free.forEach(nm => line.append(mk("span", "chip", nm)));
+  maybe.forEach(nm => { const ch = mk("span", "chip maybe", nm); ch.title = "possible as exception"; line.append(ch); });
   not.forEach(nm => line.append(mk("span", "chip no", nm)));
   d.append(line);
 }
@@ -401,6 +536,233 @@ $("heatGrid").addEventListener("click", e => {
 $("selAll").addEventListener("click", () => { everyone.forEach(r => included.add(r.user_id)); renderOverview(); });
 $("selNone").addEventListener("click", () => { included.clear(); renderOverview(); });
 $("refresh").addEventListener("click", loadAll);
+$("onlyMine").addEventListener("change", renderOverview);
+
+/* ---------- events (real dates, independent of the weekly grid) ---------- */
+const hm = t => (t || "").slice(0, 5);   // Postgres returns "18:00:00"
+function isoToday() { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+function eventWhen(ev) {
+  const d = new Date(ev.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  return d + ", " + hm(ev.start_time) + (ev.end_time ? "–" + hm(ev.end_time) : "");
+}
+let responses = [];           // rows: {event_id, user_id, name, status: "accepted" | "declined"}
+let comments = [];            // rows: {id, event_id, user_id, name, by_owner, body, created_at}
+const openComments = new Set();   // events whose comment section is expanded (kept across re-renders)
+async function loadEvents() {
+  if (demo) {
+    events = demoList(DEMO_EV_KEY).slice();
+    responses = demoList(DEMO_RSVP_KEY).slice();
+    comments = demoList(DEMO_COMMENTS_KEY).slice();
+  } else {
+    const [e, r, c] = await Promise.all([
+      sb.from("events").select("id,title,location,date,start_time,end_time,invitees,invitee_names"),
+      sb.from("event_responses").select("event_id,user_id,name,status"),
+      sb.from("event_comments").select("id,event_id,user_id,name,by_owner,body,created_at").order("created_at")
+    ]);
+    const error = e.error || r.error || c.error;
+    if (error) { events = []; renderEvents(); $("events").replaceChildren(mk("li", "status err", "Couldn't load events: " + error.message)); return; }
+    events = e.data || []; responses = r.data || []; comments = c.data || [];
+  }
+  renderEvents();
+}
+const myDisplayName = () => myName.trim() || (me.isOwner ? "Organizer" : "Someone");
+function renderEvents() {
+  const list = $("events"); list.innerHTML = "";
+  // the database already filters for participants (by id or by name); this does the same in demo mode
+  const visible = me.isOwner || !demo ? events : events.filter(ev =>
+    (ev.invitees || []).includes(me.id) || (ev.invitee_names || []).some(nm => norm(nm) === norm(myName)));
+  if (!me.isOwner) show("tab-events", visible.length > 0);
+  show("newEvent", me.isOwner);
+  $("eventsTitle").textContent = me.isOwner ? "Events" : "You're invited";
+  if (!visible.length) { list.append(mk("li", "small muted", "No events yet.")); return; }
+  const today = isoToday();
+  visible.slice().sort((a, b) => a.date.localeCompare(b.date) || hm(a.start_time).localeCompare(hm(b.start_time))).forEach(ev => {
+    const li = mk("li", ev.date < today ? "past" : null), top = mk("div", "evtop"), info = mk("div");
+    info.append(mk("b", null, ev.title), mk("div", "small", eventWhen(ev) + (ev.location ? " · " + ev.location : "")));
+    top.append(info);
+    if (me.isOwner) {
+      const del = mk("button", "link small", "Delete");
+      del.addEventListener("click", () => deleteEvent(ev));
+      top.append(del);
+    }
+    li.append(top, answersLine(ev));
+    if (!me.isOwner) li.append(answerButtons(ev));
+    li.append(commentsBox(ev));
+    list.append(li);
+  });
+}
+function answersLine(ev) {
+  const rs = responses.filter(r => r.event_id === ev.id);
+  const yes = rs.filter(r => r.status === "accepted"), no = rs.filter(r => r.status === "declined");
+  const box = mk("div", "small answers");
+  if (yes.length) { box.append(mk("span", null, "✓ ")); yes.forEach(r => box.append(mk("span", "chip", r.name))); }
+  if (no.length) { box.append(mk("span", null, "✗ ")); no.forEach(r => box.append(mk("span", "chip no", r.name))); }
+  if (me.isOwner) {
+    const waiting = (ev.invitees || []).filter(id => !rs.some(r => r.user_id === id))
+      .map(id => { const p = everyone.find(x => x.user_id === id); return p ? p.name : "unknown"; })
+      .concat((ev.invitee_names || []).filter(nm => !rs.some(r => norm(r.name) === norm(nm))).map(nm => nm + " (by name)"));
+    if (!(ev.invitees || []).length && !(ev.invitee_names || []).length) box.append(mk("span", "muted", "Nobody invited"));
+    else if (waiting.length) box.append(mk("span", "muted", "no answer yet: " + waiting.join(", ")));
+  }
+  if (!box.childNodes.length) box.append(mk("span", "muted", "No answers yet"));
+  return box;
+}
+function answerButtons(ev) {
+  const mine = responses.find(r => r.event_id === ev.id && r.user_id === me.id);
+  const row = mk("div", "row");
+  row.style.marginTop = "6px";
+  [["accepted", "yes", "✓ Accept"], ["declined", "no", "✗ Decline"]].forEach(([st, cls, label]) => {
+    const picked = mine && mine.status === st;
+    const b = mk("button", "small ans " + cls + (picked ? " picked" : ""), label);
+    b.title = picked ? "click again to withdraw your answer" : "";
+    b.addEventListener("click", () => respond(ev, picked ? null : st));
+    row.append(b);
+  });
+  return row;
+}
+async function respond(ev, status) {   // status null = withdraw
+  const row = { event_id: ev.id, user_id: me.id, name: myDisplayName(), status };
+  const others = rs => rs.filter(r => !(r.event_id === ev.id && r.user_id === me.id));
+  if (demo) demoListSave(DEMO_RSVP_KEY, others(demoList(DEMO_RSVP_KEY)).concat(status ? [row] : []));
+  else {
+    const { error } = status
+      ? await sb.from("event_responses").upsert(row, { onConflict: "event_id,user_id" })
+      : await sb.from("event_responses").delete().eq("event_id", ev.id).eq("user_id", me.id);
+    if (error) { alert("Couldn't save your answer: " + error.message); return; }
+  }
+  responses = others(responses).concat(status ? [row] : []);
+  renderEvents();
+}
+function commentsBox(ev) {
+  const cs = comments.filter(c => c.event_id === ev.id);
+  const det = mk("details", "comments");
+  det.open = openComments.has(ev.id);
+  det.addEventListener("toggle", () => { det.open ? openComments.add(ev.id) : openComments.delete(ev.id); });
+  det.append(mk("summary", "small muted", cs.length ? `Comments (${cs.length})` : "Comment"));
+  cs.forEach(c => {
+    const p = mk("div", "comment"), head = mk("div", "small muted");
+    const when = new Date(c.created_at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    head.append(mk("b", null, c.name), document.createTextNode((c.by_owner ? " · organizer" : "") + " · " + when));
+    if (c.user_id === me.id || me.isOwner) {
+      const x = mk("button", "link small", "delete");
+      x.style.marginLeft = "8px";
+      x.addEventListener("click", () => deleteComment(c));
+      head.append(x);
+    }
+    p.append(head, mk("div", "body", c.body));
+    det.append(p);
+  });
+  const form = mk("div", "row"), inp = mk("input"), send = mk("button", "small", "Send");
+  inp.type = "text"; inp.maxLength = 1000; inp.placeholder = "Write a comment…";
+  const go = () => postComment(ev, inp.value);
+  send.addEventListener("click", go);
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  form.append(inp, send);
+  det.append(form);
+  return det;
+}
+async function postComment(ev, text) {
+  const body = text.trim(); if (!body) return;
+  const row = { event_id: ev.id, user_id: me.id, name: myDisplayName(), by_owner: me.isOwner, body };
+  if (demo) {
+    Object.assign(row, { id: "demo-c-" + Date.now(), created_at: new Date().toISOString() });
+    demoListSave(DEMO_COMMENTS_KEY, demoList(DEMO_COMMENTS_KEY).concat([row]));
+  } else {
+    const { data, error } = await sb.from("event_comments").insert(row).select("id,created_at").single();
+    if (error) { alert("Couldn't post: " + error.message); return; }
+    Object.assign(row, data);
+  }
+  comments = comments.concat([row]);
+  openComments.add(ev.id);
+  renderEvents();
+}
+async function deleteComment(c) {
+  if (!confirm("Delete this comment?")) return;
+  if (demo) demoListSave(DEMO_COMMENTS_KEY, demoList(DEMO_COMMENTS_KEY).filter(x => x.id !== c.id));
+  else {
+    const { error } = await sb.from("event_comments").delete().eq("id", c.id);
+    if (error) { alert("Couldn't delete: " + error.message); return; }
+  }
+  comments = comments.filter(x => x.id !== c.id);
+  renderEvents();
+}
+const norm = s => (s || "").trim().toLowerCase();
+const evInvite = new Set();
+let evNames = [];
+function renderEvNames() {
+  const box = $("evNames"); box.innerHTML = "";
+  evNames.forEach(nm => {
+    const ch = mk("span", "chip", nm + " "), x = mk("button", "link", "×");
+    x.title = "remove";
+    x.addEventListener("click", () => { evNames = evNames.filter(n => n !== nm); renderEvNames(); });
+    ch.append(x); box.append(ch);
+  });
+}
+function addEvName() {
+  const nm = $("evName").value.trim();
+  if (nm && !evNames.some(n => norm(n) === norm(nm))) evNames.push(nm);
+  $("evName").value = ""; renderEvNames(); $("evName").focus();
+}
+function renderEvPeople() {
+  const box = $("evPeople"); box.innerHTML = "";
+  if (!everyone.length) { box.append(mk("p", "small muted", "Nobody has signed up yet.")); return; }
+  everyone.slice().sort((a, b) => a.name.localeCompare(b.name)).forEach(r => {
+    const l = mk("label"), cb = mk("input");
+    cb.type = "checkbox"; cb.checked = evInvite.has(r.user_id);
+    cb.addEventListener("change", () => { cb.checked ? evInvite.add(r.user_id) : evInvite.delete(r.user_id); });
+    l.append(cb, mk("span", null, r.name + (r.user_id === me.id ? " (you)" : "")));
+    box.append(l);
+  });
+}
+function openEventForm() {
+  $("evTitle").value = ""; $("evWhere").value = "";
+  $("evDate").value = isoToday(); $("evStart").value = "18:00"; $("evEnd").value = "";
+  evInvite.clear(); evNames = [];
+  renderEvPeople(); renderEvNames();
+  setStatus($("evMsg"), "");
+  show("eventForm", true);
+  $("evTitle").focus();
+}
+async function saveEvent() {
+  const title = $("evTitle").value.trim(), date = $("evDate").value, start = $("evStart").value, end = $("evEnd").value;
+  if (!title) { setStatus($("evMsg"), "Give the event a title", true); return; }
+  if (!date || !start) { setStatus($("evMsg"), "Pick a date and start time", true); return; }
+  if (end && end <= start) { setStatus($("evMsg"), "End time must be after the start", true); return; }
+  const row = { title, location: $("evWhere").value.trim(), date, start_time: start, end_time: end || null, invitees: [...evInvite], invitee_names: evNames.slice() };
+  setStatus($("evMsg"), "Saving…");
+  if (demo) { row.id = "demo-ev-" + Date.now(); demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).concat([row])); }
+  else {
+    const { data, error } = await sb.from("events").insert(row).select("id").single();
+    if (error) { setStatus($("evMsg"), "Couldn't save: " + error.message, true); return; }
+    row.id = data.id;
+  }
+  events = events.concat([row]);
+  show("eventForm", false);
+  renderEvents();
+}
+async function deleteEvent(ev) {
+  if (!confirm(`Delete “${ev.title}”?`)) return;
+  if (demo) {
+    demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).filter(x => x.id !== ev.id));
+    [DEMO_RSVP_KEY, DEMO_COMMENTS_KEY].forEach(k => demoListSave(k, demoList(k).filter(x => x.event_id !== ev.id)));
+  }
+  else {
+    const { error } = await sb.from("events").delete().eq("id", ev.id);
+    if (error) { alert("Couldn't delete: " + error.message); return; }
+  }
+  events = events.filter(x => x.id !== ev.id);
+  responses = responses.filter(x => x.event_id !== ev.id);
+  comments = comments.filter(x => x.event_id !== ev.id);
+  renderEvents();
+}
+$("evSave").addEventListener("click", saveEvent);
+$("evCancel").addEventListener("click", () => show("eventForm", false));
+$("evAll").addEventListener("click", () => { everyone.forEach(r => evInvite.add(r.user_id)); renderEvPeople(); });
+$("evNone").addEventListener("click", () => { evInvite.clear(); renderEvPeople(); });
+$("newEvent").addEventListener("click", openEventForm);
+$("evRefresh").addEventListener("click", () => { if (me.isOwner) loadAll(); loadEvents(); });
+$("evAddName").addEventListener("click", addEvName);
+$("evName").addEventListener("keydown", e => { if (e.key === "Enter") addEvName(); });
 
 /* ---------- tabs ---------- */
 $("tabs").addEventListener("click", e => {
@@ -408,7 +770,8 @@ $("tabs").addEventListener("click", e => {
   document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x === b));
   show("tab-mine", b.dataset.tab === "mine");
   show("tab-overview", b.dataset.tab === "overview");
-  if (b.dataset.tab === "overview") loadAll();
+  show("tab-events", b.dataset.tab === "events");
+  if (b.dataset.tab === "overview" || b.dataset.tab === "events") loadAll();
 });
 
 /* ---------- entering the app ---------- */
@@ -416,19 +779,22 @@ async function enterApp() {
   show("landing", false); show("app", true);
   show("tabs", me.isOwner);
   show("signOut", !demo && me.isOwner);
+  document.body.classList.toggle("participant", !me.isOwner);
   if (!me.isOwner) { show("tab-mine", true); show("tab-overview", false); }
   // load my own row
   let row = null;
   if (demo) row = demoLoad().find(r => r.user_id === me.id) || null;
   else {
-    const { data } = await sb.from("availability").select("user_id,name,slots").eq("user_id", me.id).maybeSingle();
+    const { data } = await sb.from("availability").select("user_id,name,slots,maybe_slots").eq("user_id", me.id).maybeSingle();
     row = data;
   }
-  if (row) { myName = row.name; mySlots = new Set(row.slots || []); }
+  if (row) { myName = row.name; mySlots = new Set(row.slots || []); myMaybe = new Set(row.maybe_slots || []); }
+  savedName = row ? row.name : null;
   if (!myName && me.isOwner) myName = me.email ? me.email.split("@")[0] : "Me";
   $("myName").value = myName;
   renderEdit();
   if (me.isOwner) loadAll();
+  loadEvents();
 }
 
 /* ---------- landing actions ---------- */
@@ -459,8 +825,11 @@ async function init() {
     show("demoBanner", true);
     const role = $("demoRole");
     const go = () => {
-      me.id = "demo-me"; me.isOwner = role.value === "owner";
+      me.isOwner = role.value === "owner";
+      me.id = me.isOwner ? "demo-me" : "demo-guest";   // separate people, like real logins
+      myName = ""; mySlots = new Set(); myMaybe = new Set();
       focusKey = null;
+      show("eventForm", false);
       document.querySelector('#tabs button[data-tab="mine"]').click();
       enterApp();
     };
