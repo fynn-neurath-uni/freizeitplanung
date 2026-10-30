@@ -79,6 +79,8 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
 @media (max-width:760px){.overview{grid-template-columns:1fr}}
 .people label{display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer}
 .people .cnt{margin-left:auto;font-size:12px;color:var(--muted)}
+.people .del{font-size:16px;line-height:1;text-decoration:none;padding:0 2px}
+.people .del:hover{color:var(--warn)}
 .legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin:10px 0 0}
 .legend .sw{width:18px;height:12px;border-radius:3px}
 .detail{margin-top:12px;font-size:14px;min-height:3em}
@@ -173,7 +175,7 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
         <ul id="events" class="events"></ul>
       </div>
       <div id="eventForm" class="panel evform hidden">
-        <h2>New event</h2>
+        <h2 id="evFormTitle">New event</h2>
         <div class="fields">
           <label class="f">Title <input id="evTitle" type="text" maxlength="100" placeholder="e.g. Board game night"></label>
           <label class="f">Where <input id="evWhere" type="text" maxlength="200" placeholder="optional"></label>
@@ -470,8 +472,33 @@ function renderPeople() {
     const cnt = mk("span", "cnt", f + (m ? " +" + m : ""));
     cnt.title = f + " free" + (m ? ", " + m + " as exception" : "");
     l.append(cb, mk("span", null, r.name + (r.user_id === me.id ? " (you)" : "")), cnt);
+    if (r.user_id !== me.id) {
+      const del = mk("button", "link small del", "×");
+      del.title = "Delete " + r.name + " completely";
+      del.addEventListener("click", e => { e.preventDefault(); removePerson(r); });
+      l.append(del);
+    }
     box.append(l);
   });
+}
+async function removePerson(r) {
+  if (!confirm(`Delete ${r.name} completely?\n\nTheir hours, answers and comments are removed and they're taken off all events. ` +
+    `(If they open the page again in the same browser, they can start over.)`)) return;
+  if (demo) {
+    demoMem = demoLoad().filter(x => x.user_id !== r.user_id);
+    try { localStorage.setItem(DEMO_KEY, JSON.stringify(demoMem)); } catch (e) {}
+    demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).map(e => ({ ...e, invitees: (e.invitees || []).filter(id => id !== r.user_id) })));
+    [DEMO_RSVP_KEY, DEMO_COMMENTS_KEY].forEach(k => demoListSave(k, demoList(k).filter(x => x.user_id !== r.user_id)));
+  } else {
+    // one database function does all of it; it refuses unless the caller is the organizer
+    const { error } = await sb.rpc("remove_person", { uid: r.user_id });
+    if (error) { alert("Couldn't delete: " + error.message); return; }
+  }
+  everyone = everyone.filter(x => x.user_id !== r.user_id);
+  included.delete(r.user_id);
+  if (focusKey) showDetail(focusKey);
+  renderOverview();
+  loadEvents();
 }
 function counts() {
   const sel = everyone.filter(r => included.has(r.user_id));
@@ -581,9 +608,11 @@ function renderEvents() {
     info.append(mk("b", null, ev.title), mk("div", "small", eventWhen(ev) + (ev.location ? " · " + ev.location : "")));
     top.append(info);
     if (me.isOwner) {
-      const del = mk("button", "link small", "Delete");
+      const acts = mk("span", "row small"), edit = mk("button", "link small", "Edit"), del = mk("button", "link small", "Delete");
+      edit.addEventListener("click", () => openEventForm(ev));
       del.addEventListener("click", () => deleteEvent(ev));
-      top.append(del);
+      acts.append(edit, del);
+      top.append(acts);
     }
     li.append(top, answersLine(ev));
     if (!me.isOwner) li.append(answerButtons(ev));
@@ -618,7 +647,29 @@ function answerButtons(ev) {
     b.addEventListener("click", () => respond(ev, picked ? null : st));
     row.append(b);
   });
+  const leave = mk("button", "link small", "Leave event");
+  leave.style.marginLeft = "auto";
+  leave.addEventListener("click", () => leaveEvent(ev));
+  row.append(leave);
   return row;
+}
+// Is this response's author still invited? (mirrors the database trigger, for demo mode)
+function stillInvited(ev, r) {
+  return (ev.invitees || []).includes(r.user_id) || (ev.invitee_names || []).some(nm => norm(nm) === norm(r.name));
+}
+async function leaveEvent(ev) {
+  if (!confirm(`Remove yourself from “${ev.title}”? You won't see it anymore.`)) return;
+  if (demo) {
+    const left = e => ({ ...e, invitees: (e.invitees || []).filter(id => id !== me.id),
+      invitee_names: (e.invitee_names || []).filter(nm => norm(nm) !== norm(myName)) });
+    demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).map(e => e.id === ev.id ? left(e) : e));
+    demoListSave(DEMO_RSVP_KEY, demoList(DEMO_RSVP_KEY).filter(r => !(r.event_id === ev.id && r.user_id === me.id)));
+  } else {
+    // participants can't edit events; this database function removes only the caller
+    const { error } = await sb.rpc("leave_event", { eid: ev.id });
+    if (error) { alert("Couldn't leave: " + error.message); return; }
+  }
+  loadEvents();
 }
 async function respond(ev, status) {   // status null = withdraw
   const row = { event_id: ev.id, user_id: me.id, name: myDisplayName(), status };
@@ -714,14 +765,22 @@ function renderEvPeople() {
     box.append(l);
   });
 }
-function openEventForm() {
-  $("evTitle").value = ""; $("evWhere").value = "";
-  $("evDate").value = isoToday(); $("evStart").value = "18:00"; $("evEnd").value = "";
-  evInvite.clear(); evNames = [];
+let editingId = null;          // id of the event being edited, null = creating a new one
+function openEventForm(ev) {
+  ev = ev && ev.id ? ev : null;   // also used as a click handler, which passes the click event
+  editingId = ev ? ev.id : null;
+  $("evFormTitle").textContent = ev ? "Edit event" : "New event";
+  $("evSave").textContent = ev ? "Save changes" : "Create event";
+  $("evTitle").value = ev ? ev.title : ""; $("evWhere").value = ev ? ev.location || "" : "";
+  $("evDate").value = ev ? ev.date : isoToday();
+  $("evStart").value = ev ? hm(ev.start_time) : "18:00"; $("evEnd").value = ev ? hm(ev.end_time) : "";
+  evInvite.clear(); (ev ? ev.invitees || [] : []).forEach(id => evInvite.add(id));
+  evNames = ev ? (ev.invitee_names || []).slice() : [];
   renderEvPeople(); renderEvNames();
   setStatus($("evMsg"), "");
   show("eventForm", true);
-  $("evTitle").focus();
+  $("eventForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("evTitle").focus({ preventScroll: true });
 }
 async function saveEvent() {
   const title = $("evTitle").value.trim(), date = $("evDate").value, start = $("evStart").value, end = $("evEnd").value;
@@ -730,6 +789,20 @@ async function saveEvent() {
   if (end && end <= start) { setStatus($("evMsg"), "End time must be after the start", true); return; }
   const row = { title, location: $("evWhere").value.trim(), date, start_time: start, end_time: end || null, invitees: [...evInvite], invitee_names: evNames.slice() };
   setStatus($("evMsg"), "Saving…");
+  if (editingId) {
+    row.id = editingId;
+    if (demo) {
+      demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).map(e => e.id === row.id ? row : e));
+      // answers of people who are no longer invited go away (the database does this with a trigger)
+      demoListSave(DEMO_RSVP_KEY, demoList(DEMO_RSVP_KEY).filter(r => r.event_id !== row.id || stillInvited(row, r)));
+    } else {
+      const { error } = await sb.from("events").update(row).eq("id", row.id);
+      if (error) { setStatus($("evMsg"), "Couldn't save: " + error.message, true); return; }
+    }
+    show("eventForm", false);
+    loadEvents();
+    return;
+  }
   if (demo) { row.id = "demo-ev-" + Date.now(); demoListSave(DEMO_EV_KEY, demoList(DEMO_EV_KEY).concat([row])); }
   else {
     const { data, error } = await sb.from("events").insert(row).select("id").single();

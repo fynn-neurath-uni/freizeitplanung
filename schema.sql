@@ -125,6 +125,41 @@ drop trigger if exists event_responses_touch on public.event_responses;
 create trigger event_responses_touch before update on public.event_responses
   for each row execute function public.touch_updated_at();
 
+-- When people are removed from an event (by the organizer editing it, or by leaving), their answer goes too.
+create or replace function public.drop_uninvited_responses() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.event_responses r
+  where r.event_id = new.id
+    and not (
+      r.user_id = any(new.invitees)
+      or exists (
+        select 1 from public.availability a
+        where a.user_id = r.user_id
+          and lower(btrim(a.name)) in (select lower(btrim(x)) from unnest(new.invitee_names) as x)
+      )
+    );
+  return null;
+end $$;
+drop trigger if exists events_drop_uninvited on public.events;
+create trigger events_drop_uninvited after update of invitees, invitee_names on public.events
+  for each row execute function public.drop_uninvited_responses();
+
+-- Participants can't edit events, but they can remove themselves: this takes out only the caller's
+-- own id, and any invited name that matches their own name.
+create or replace function public.leave_event(eid uuid) returns void
+language sql security definer set search_path = public as $$
+  update public.events e
+  set invitees = array_remove(e.invitees, auth.uid()),
+      invitee_names = array(
+        select x from unnest(e.invitee_names) as x
+        where lower(btrim(x)) not in (select lower(btrim(a.name)) from public.availability a where a.user_id = auth.uid())
+      )
+  where e.id = eid and auth.uid() is not null
+$$;
+revoke execute on function public.leave_event(uuid) from public, anon;
+grant execute on function public.leave_event(uuid) to authenticated;
+
 -- Comments. Everyone who can see the event sees and can write comments; people delete their own,
 -- the organizer can delete any. by_owner (the "organizer" label) can only be set by the organizer.
 create table if not exists public.event_comments (
@@ -151,3 +186,19 @@ create policy "comment if event visible" on public.event_comments
 drop policy if exists "delete own or owner" on public.event_comments;
 create policy "delete own or owner" on public.event_comments
   for delete to authenticated using (user_id = auth.uid() or public.is_owner());
+
+-- The organizer can delete a person completely: their hours, answers and comments, and their
+-- direct invites. Refuses for anyone else. (Name invites stay: they're names, not people.)
+create or replace function public.remove_person(uid uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_owner() then
+    raise exception 'only the organizer can remove people';
+  end if;
+  update public.events set invitees = array_remove(invitees, uid) where uid = any(invitees);
+  delete from public.event_responses where user_id = uid;
+  delete from public.event_comments where user_id = uid;
+  delete from public.availability where user_id = uid;
+end $$;
+revoke execute on function public.remove_person(uuid) from public, anon;
+grant execute on function public.remove_person(uuid) to authenticated;
