@@ -24,11 +24,11 @@ const CONFIG = {
 <style>
 :root{
   --bg:#f6f5f1;--panel:#ffffff;--text:#1d1d1b;--muted:#6b6a64;--line:#e2e0d9;
-  --accent:#1f8a5b;--accent-rgb:31,138,91;--mine:#2f6fdb;--mine-rgb:47,111,219;--cell:#eeede8;--warn:#c2410c;
+  --accent:#1f8a5b;--accent-rgb:31,138,91;--mine:#2f6fdb;--mine-rgb:47,111,219;--cell:#eeede8;--warn:#c2410c;--exception:#eab308;
 }
 @media (prefers-color-scheme:dark){
   :root{--bg:#141413;--panel:#1d1d1b;--text:#ecebe6;--muted:#9a9993;--line:#34332f;
-  --accent:#3fbf86;--accent-rgb:63,191,134;--mine:#5b8ff0;--mine-rgb:91,143,240;--cell:#282825;--warn:#fb923c}
+  --accent:#3fbf86;--accent-rgb:63,191,134;--mine:#5b8ff0;--mine-rgb:91,143,240;--cell:#282825;--warn:#fb923c;--exception:#facc15}
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -72,8 +72,8 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
 .heat .cell.all{box-shadow:inset 0 0 0 2px var(--text)}
 .heat .cell.focus{outline:2px solid var(--warn);outline-offset:1px}
 .mine-dot{position:relative}
-.mine-dot::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--mine);box-shadow:0 0 0 1.5px var(--panel)}
-.mine-dot.maybe-dot::after{background:var(--panel);box-shadow:inset 0 0 0 2px var(--mine),0 0 0 1.5px var(--panel)}
+.mine-dot::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--panel)}
+.mine-dot.maybe-dot::after{background:var(--exception)}
 /* overview */
 .overview{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:760px){.overview{grid-template-columns:1fr}}
@@ -224,6 +224,12 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;gap
       </div>
       <p class="small muted">Click or drag across the grid to mark your hours. Clicking a slot that already has the chosen option clears it. Changes save automatically.</p>
       <div class="gridwrap"><div id="editGrid" class="grid edit"></div></div>
+      <div id="orgLegend" class="legend hidden">
+        <span class="sw mine-dot" style="background:var(--cell)"></span>
+        <span>organizer is free</span>
+        <span class="sw mine-dot maybe-dot" style="background:var(--cell);margin-left:10px"></span>
+        <span>organizer: possible as exception</span>
+      </div>
     </div>
 
     <div id="tab-overview" class="hidden">
@@ -376,12 +382,26 @@ function buildGrid(el, decorate) {
 }
 function renderEdit() {
   buildGrid($("editGrid"), c => {
-    c.classList.toggle("on", mySlots.has(c.dataset.k));
-    c.classList.toggle("maybe", myMaybe.has(c.dataset.k));
+    const k = c.dataset.k;
+    c.classList.toggle("on", mySlots.has(k));
+    c.classList.toggle("maybe", myMaybe.has(k));
+    if (orgSlots.has(k)) { c.classList.add("mine-dot"); c.title = "The organizer is free"; }
+    else if (orgMaybe.has(k)) { c.classList.add("mine-dot", "maybe-dot"); c.title = "The organizer: possible as exception"; }
   });
   const free = mySlots.size, maybe = myMaybe.size;
   $("whoami").textContent = (me.isOwner ? "Organizer · " : "") + (myName ? myName + " · " : "") +
     free + " slot" + (free === 1 ? "" : "s") + " free" + (maybe ? ", " + maybe + " as exception" : "");
+}
+let orgSlots = new Set(), orgMaybe = new Set();   // the organizer's hours, shown to participants as dots
+async function loadOrganizerHours() {
+  let row = null;
+  if (!me.isOwner) {
+    if (demo) row = demoLoad().find(r => r.user_id === "demo-me");
+    else { const { data } = await sb.rpc("organizer_hours"); row = data && data[0]; }
+  }
+  orgSlots = new Set(row ? row.slots || [] : []);
+  orgMaybe = new Set(row ? row.maybe_slots || [] : []);
+  show("orgLegend", orgSlots.size + orgMaybe.size > 0);
 }
 let brush = "free";
 $("brush").addEventListener("click", e => {
@@ -865,6 +885,7 @@ async function enterApp() {
   savedName = row ? row.name : null;
   if (!myName && me.isOwner) myName = me.email ? me.email.split("@")[0] : "Me";
   $("myName").value = myName;
+  await loadOrganizerHours();
   renderEdit();
   if (me.isOwner) loadAll();
   loadEvents();

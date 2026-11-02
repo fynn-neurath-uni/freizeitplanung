@@ -13,10 +13,15 @@ alter table public.availability add column if not exists maybe_slots text[] not 
 
 alter table public.availability enable row level security;
 
+create or replace function public.owner_email() returns text
+language sql immutable as $$
+  select 'fynn.neurath@uni-tuebingen.de'::text
+$$;
+
 -- Who is the organizer? Checked against the verified email in the login token.
 create or replace function public.is_owner() returns boolean
 language sql stable as $$
-  select lower(coalesce(auth.jwt() ->> 'email', '')) = lower('fynn.neurath@uni-tuebingen.de')
+  select lower(coalesce(auth.jwt() ->> 'email', '')) = lower(public.owner_email())
 $$;
 
 -- Everyone sees only their own row; the organizer sees all rows.
@@ -202,3 +207,15 @@ begin
 end $$;
 revoke execute on function public.remove_person(uuid) from public, anon;
 grant execute on function public.remove_person(uuid) to authenticated;
+
+-- Participants see the organizer's marked hours as dots on their grid. This returns only those
+-- slots, and finds the organizer by confirmed login email, so choosing a name can't fake it.
+create or replace function public.organizer_hours() returns table (slots text[], maybe_slots text[])
+language sql stable security definer set search_path = public as $$
+  select a.slots, a.maybe_slots
+  from public.availability a
+  join auth.users u on u.id = a.user_id
+  where lower(u.email) = lower(public.owner_email()) and u.email_confirmed_at is not null
+$$;
+revoke execute on function public.organizer_hours() from public, anon;
+grant execute on function public.organizer_hours() to authenticated;

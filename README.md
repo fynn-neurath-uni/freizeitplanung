@@ -3,12 +3,12 @@
 A single-page scheduling tool for GitHub Pages.
 
 - **Participants** open the link, type their name, and paint their hours as **Free** or **Possible as exception**. They only ever see their own entries.
-- **You (the organizer)** log in by email and get a second tab, **Overview**: a heatmap of everyone's free hours overlapping, checkboxes to include/exclude people, a "best times" list, and who is / isn't free in each slot. Your own free slots are marked with a blue dot.
+- **You (the organizer)** log in by email and get a second tab, **Overview**: a heatmap of everyone's free hours overlapping, checkboxes to include/exclude people, a "best times" list, and who is / isn't free in each slot. Your own slots are marked with a dot: green where you're free, yellow where it's possible as an exception.
 - **Events**: in a separate **Events** tab you create events on real dates (title, place, date, time) and pick who's invited: tick people who already signed up, or type a name. A name invite is shown to every participant whose name matches (upper/lower case ignored). Names are self-chosen, so anyone who enters that name sees the event; use the checkboxes for anything private. Invited participants see events at the top of their page; nobody else does.
 - **Answers & comments**: invited participants can **accept** or **decline** (and change or withdraw that), and everyone who can see an event can comment on it. All invitees see who accepted/declined and the comments; you also see who hasn't answered yet.
 - **Changing events**: you can edit an event after creating it (details and who's invited); participants can leave an event themselves. Anyone removed loses access, and their answer is removed.
 
-Privacy is enforced by the database (Supabase row-level security), not just hidden in the page — a participant can't read other people's data even with browser dev tools.
+Privacy is enforced by the database (Supabase row-level security), not just hidden in the page — a participant can't read other people's data even with browser dev tools. The one deliberate exception: participants see the organizer's marked hours as dots on their grid.
 
 Open `index.html` without configuring anything to try it in **demo mode** (fake people, data stays in your browser).
 
